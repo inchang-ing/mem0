@@ -98,6 +98,10 @@ _RUNTIME_FIELDS = frozenset({
     "auth",
     "connection_class",
     "ssl_context",
+    # A bool switch (use DefaultAzureCredential instead of a password), not a
+    # credential — the "_credential" suffix rule would otherwise redact it,
+    # breaking pydantic reconstruction for configs with a live connection_pool.
+    "use_azure_credential",
 })
 
 # Fields that are known to contain sensitive secrets and must be redacted.

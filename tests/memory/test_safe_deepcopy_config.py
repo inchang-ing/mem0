@@ -26,6 +26,7 @@ class TestRuntimeFieldsPreserved:
         "auth",
         "connection_class",
         "ssl_context",
+        "use_azure_credential",
     ])
     def test_runtime_fields_are_not_sensitive(self, field):
         assert _is_sensitive_field(field) is False
@@ -165,8 +166,8 @@ class TestRealWorldFieldCoverage:
         ("credentials_path", False),
         # AWS
         ("aws_session_token", True),
-        # Azure MySQL
-        ("use_azure_credential", True),
+        # Azure MySQL — a bool switch, not a secret (#7490)
+        ("use_azure_credential", False),
         # General non-sensitive
         ("collection_name", False),
         ("embedding_model_dims", False),
@@ -341,6 +342,41 @@ class TestSafeDeepcopyWithRealPydanticModel:
         # Normal fields preserved
         assert result.host == "myhost"
         assert result.port == 9200
+
+
+class TestSafeDeepcopyPreservesBoolSwitch:
+    """Regression (#7490): the bool switch use_azure_credential must survive
+    the reconstruction path.
+
+    AzureMySQLConfig with a live connection_pool fails bare deepcopy, so
+    _safe_deepcopy_config rebuilds the config field-by-field. Redacting the
+    bool (matched only by the "_credential" suffix) made that reconstruction
+    raise ValidationError, and the broad except degraded the clone to a plain
+    object without model_dump — every downstream config consumer then broke.
+    """
+
+    def test_azure_mysql_config_with_live_pool_survives_reconstruction(self):
+        import sqlite3
+
+        from mem0.configs.vector_stores.azure_mysql import AzureMySQLConfig
+
+        config = AzureMySQLConfig(
+            host="myserver.mysql.database.azure.com",
+            user="mem0",
+            database="mem0",
+            password="hunter2",
+            use_azure_credential=True,
+            connection_pool=sqlite3.connect(":memory:"),
+        )
+
+        result = _safe_deepcopy_config(config)
+
+        # The clone must be a real config, not the degraded plain object.
+        assert isinstance(result, AzureMySQLConfig)
+        assert result.use_azure_credential is True
+        assert hasattr(result, "model_dump")
+        # Real credentials are still redacted on the same clone.
+        assert result.password is None
 
 
 class TestSafeDeepcopyWithDataclass:
